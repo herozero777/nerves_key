@@ -303,6 +303,29 @@ signer_key = File.read!("/tmp/#{cert_name}.key") |> X509.PrivateKey.from_pem!();
 NervesKey.provision_aux_certificates(i2c, signer_cert, signer_key)
 ```
 
+## Provisioning an auxiliary certificate using CSR (Certificate Signing Request)
+
+The NervesKey must be provisioned before the auxiliary certificate can be
+written. Copy the signer certificate and to your device similar to what you did before.
+Then run the following at the device IEx prompt:
+
+# test
+
+cert_name="signer-ca-2"
+signer_cert = File.read!("/tmp/#{cert_name}.cert") |> X509.Certificate.from_pem!;true
+##
+```elixir
+# Customize these
+cert_name="nerveskey_prod_signer1"
+
+# These lines should be copy/paste
+signer_cert = File.read!("/tmp/#{cert_name}.cert") |> X509.Certificate.from_pem!;true
+
+{:ok, i2c} = ATECC508A.Transport.I2C.init([])
+device_cert = NervesKey.get_csr_signed i2c
+NervesKey.provision_aux_device_n_signer_cert(i2c, device_cert, signer_cert)
+```
+
 ## Debugging without an ATECC508A/608A
 
 Before hardware is available or if you're debugging connections to a service
