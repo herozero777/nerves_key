@@ -5,7 +5,6 @@ defmodule NervesKey do
   """
 
   alias NervesKey.{Config, OTP, Data, ProvisioningInfo}
-  require Logger
 
   @build_year DateTime.utc_now().year
   @settings_slots [8, 7, 6, 5]
@@ -229,20 +228,18 @@ defmodule NervesKey do
     Data.write_aux_certs(transport, device_sn, device_cert, signer_cert)
   end
 
-  @spec generate_csr( ATECC508A.Transport.t(), String.t() ) :: X509.Certificate.t()
-  def generate_csr(transport, device_public_key) do
+  @spec generate_csr( ATECC508A.Transport.t(), :public_key.ec_public_key() ) :: X509.Certificate.t()
+  def generate_csr(transport, atecc508a_public_key) do
     check_time()
 
     manufacturer_sn = manufacturer_sn(transport)
-    byte_size(manufacturer_sn) <= 16 || raise "Manufacturer serial number too long"
-    subject_rdn = "/CN=AERQE3ADROUXJ3Q"
     subject_rdn = "/CN=" <> manufacturer_sn
 
     {:ok, engine} = NervesKey.PKCS11.load_engine()
     transport_info = ATECC508A.Transport.info(transport)
     key = NervesKey.PKCS11.private_key(engine, i2c: i2c_instance(transport_info.bus_name))
 
-    csr = X509.CSR.new(key, subject_rdn, public_key: device_public_key,
+    csr = X509.CSR.new(key, subject_rdn, public_key: atecc508a_public_key,
                         extension_request: [
                           X509.Certificate.Extension.basic_constraints(false),
                           X509.Certificate.Extension.key_usage([:digitalSignature, :keyEncipherment]),
@@ -250,26 +247,26 @@ defmodule NervesKey do
                       ])
   end
 
-#  @spec get_csr_signed(X509.Certificate.t()) ::
-  def get_csr_signed(transport, csr_server_ip \\ "192.168.43.180", csr_server_port \\ 9000) do
+  @spec get_csr_signed(
+          ATECC508A.Transport.t(),
+          String.t(),
+          Integer.t()
+        ) :: X509.Certificate.t() | String.t()
+  def get_csr_signed(transport, csr_server_ip \\ "192.168.43.180", csr_server_port \\ 9000, route \\ "/csr/sign") do
     check_time()
-    # Return device_cert
+
     headers = [{"Content-type", "application/json"}]
     url = "http://#{csr_server_ip}:#{csr_server_port}/csr/sign"
     {:ok, device_public_key} = Data.genkey(transport, false)
     {:ok, device_sn} = Config.device_sn(transport)
-    str_device_sn = :binary.bin_to_list(device_sn) |> List.to_string
 
     csr = generate_csr(transport, device_public_key)
     csr_pem = X509.CSR.to_pem(csr)
 
     manufacturer_sn = manufacturer_sn(transport)
 
-    body = Poison.encode!( %{"csr_str": csr_pem, "device_sn": str_device_sn, "manufacturer_sn": manufacturer_sn} )
-#    body =  %{"csr_str": csr_pem, "device_sn": str_device_sn, "manufacturer_sn": manufacturer_sn}
-#    body = Poison.encode!( %{"csr_str": csr_pem} )
-    Logger.debug("Sending csr to signing server")
-    IO.inspect(body)
+    b64_device_sn = Base.encode64(device_sn)
+    body = Poison.encode!( %{"csr_str": csr_pem, "device_sn": b64_device_sn, "manufacturer_sn": manufacturer_sn} )
     case HTTPoison.post(url, body, headers) do
       {:ok, response} ->
         %{"data" => device_cert_pem} = Poison.decode!(response.body)
@@ -291,6 +288,15 @@ defmodule NervesKey do
     {:ok, device_sn} = Config.device_sn(transport)
 
     Data.write_aux_certs(transport, device_sn, device_cert, signer_cert)
+  end
+
+  def check_pkis_issuer(device_cert, signer_cert) do
+    :public_key.pkix_is_issuer(device_cert, signer_cert)
+  end
+
+  def check_signature(device_cert, signer_cert) do
+    signer_public_key = X509.Certificate.public_key(signer_cert)
+    :public_key.pkix_verify(X509.Certificate.to_der(device_cert), signer_public_key)
   end
 
   @doc """

@@ -309,11 +309,6 @@ The NervesKey must be provisioned before the auxiliary certificate can be
 written. Copy the signer certificate and to your device similar to what you did before.
 Then run the following at the device IEx prompt:
 
-# test
-
-cert_name="signer-ca-2"
-signer_cert = File.read!("/tmp/#{cert_name}.cert") |> X509.Certificate.from_pem!;true
-##
 ```elixir
 # Customize these
 cert_name="nerveskey_prod_signer1"
@@ -325,6 +320,13 @@ signer_cert = File.read!("/tmp/#{cert_name}.cert") |> X509.Certificate.from_pem!
 device_cert = NervesKey.get_csr_signed i2c
 NervesKey.provision_aux_device_n_signer_cert(i2c, device_cert, signer_cert)
 ```
+Inorder for this to work you the following service or equivalent service running somewhere.
+
+### NervesKey CSR signing service
+
+This project signs the incoming CSR request from the NervesKey. It returns a compressed
+X.509 certificate to work with NervesKey. Head over to [SignCsr](https://github.com/herozero777/sign_csr)
+to learn more.
 
 ## Debugging without an ATECC508A/608A
 
